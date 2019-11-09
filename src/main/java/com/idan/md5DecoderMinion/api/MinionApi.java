@@ -1,6 +1,7 @@
 package com.idan.md5DecoderMinion.api;
 
 import com.idan.md5DecoderMinion.controler.MinionController;
+import com.idan.md5DecoderMinion.exceptions.ApplicationException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,19 +15,17 @@ public class MinionApi {
     private MinionController controller;
 
     @RequestMapping(value = "/decodeRequest", method = RequestMethod.POST)
-    public void startDecoding(@RequestBody String hashToDecode) throws InterruptedException {
-
-
+    public void startDecoding(@RequestBody String hashToDecode) throws ApplicationException {
         controller.addRequest(hashToDecode);
     }
 
     @RequestMapping(value = "/removeHash", method = RequestMethod.POST)
-    public void removeHashToDecode(@RequestBody String hashToRemove) throws InterruptedException {
+    public void removeHashToDecode(@RequestBody String hashToRemove) {
         controller.removeHashToDecode(hashToRemove);
     }
 
     @RequestMapping(value = "/updateRange", method = RequestMethod.POST)
-    public void updateRange(@RequestBody int[] range) throws InterruptedException {
+    public void updateRange(@RequestBody int[] range) throws ApplicationException {
         controller.updateDecodingRange(range);
     }
 
