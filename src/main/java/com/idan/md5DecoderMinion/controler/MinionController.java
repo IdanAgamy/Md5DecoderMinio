@@ -2,11 +2,13 @@ package com.idan.md5DecoderMinion.controler;
 
 //import com.idan.md5DecoderMinion.beans.DecodeRequest;
 
+import com.idan.md5DecoderMinion.enums.ErrorType;
 import com.idan.md5DecoderMinion.exceptions.ApplicationException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import javax.xml.bind.DatatypeConverter;
@@ -38,16 +40,21 @@ public class MinionController implements Runnable {
         this.waitForHashObj = new Object();
     }
 
-    private static String returnMD5Hash(String str) throws NoSuchAlgorithmException {
-        MessageDigest md = MessageDigest.getInstance("MD5");
-        md.update(str.getBytes());
-        byte[] digest = md.digest();
-        String hash = DatatypeConverter.printHexBinary(digest).toUpperCase();
-        return hash;
+    private static String returnMD5Hash(String str) throws ApplicationException {
+        MessageDigest md = null;
+        try {
+            md = MessageDigest.getInstance("MD5");
+            md.update(str.getBytes());
+            byte[] digest = md.digest();
+            String hash = DatatypeConverter.printHexBinary(digest).toUpperCase();
+            return hash;
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+            throw new ApplicationException("Could not encode hash for password: " + str, e, ErrorType.SYSTEM_ERROR);
+        }
     }
 
-    private boolean isCorrectPassword(String passwordAttempt, String hashToDecode) throws NoSuchAlgorithmException {
-//        System.out.println(hashToDecode);
+    private boolean isCorrectPassword(String passwordAttempt, String hashToDecode) throws ApplicationException {
         return hashToDecode.equals(returnMD5Hash(passwordAttempt));
     }
 
@@ -69,18 +76,7 @@ public class MinionController implements Runnable {
         this.endOfSearchRange = range[1];
     }
 
-    private void validateDecodingRange(int[] range) throws ApplicationException {
-        for (int limit : range) {
-            if (limit > 99999999 || limit < 0) {
-                throw new ApplicationException("range out of bound (" + limit + ")");
-            }
-        }
-        if (range[0] > range[1]) {
-            throw new ApplicationException("range out of bound parameters are reversed");
-        }
-    }
-
-    private void decodingHash() throws NoSuchAlgorithmException {
+    private void decodingHash() throws ApplicationException {
         for (int i = this.startOfSearchRange; i <= this.endOfSearchRange; i++) {
             if (i < this.startOfSearchRange) {
                 break;
@@ -102,41 +98,48 @@ public class MinionController implements Runnable {
         }
     }
 
-    private void sendResultToMaster(String decodedHash, String decodedPassword) {
+    private void sendResultToMaster(String decodedHash, String decodedPassword) throws ApplicationException {
         String masterUri = this.masterHostname + ":" + this.masterPort;
         RestTemplate rt = new RestTemplate();
         String uri = "http://" + masterUri + "/getResult";
         String[] results = {decodedHash, decodedPassword};
         HttpEntity<String[]> request = new HttpEntity<>(results);
-        ResponseEntity<String[]> returnReq = rt.postForEntity(uri, request, String[].class);
-    }
-
-    private void validateHash(String hash) throws ApplicationException {
-        if (hash.length() != 32) {
-            throw new ApplicationException("The hash is not 32 char long or the password is not 10 char long " + hash + ").");
-        }
-        if (!Pattern.compile("^[0-9A-Fa-f]+$").matcher(hash).matches()) {
-            throw new ApplicationException("the hash is not in hex " + hash + ").");
+        try {
+            ResponseEntity<String[]> returnReq = rt.postForEntity(uri, request, String[].class);
+        } catch (RestClientException e) {
+            e.printStackTrace();
+            throw new ApplicationException("Could not send results to master server", e, ErrorType.HTTP_REQUEST_ERROR);
         }
     }
 
     @Override
     public void run() {
-        registerToMaster();
-        decoding();
+        try {
+            registerToMaster();
+            decoding();
+        } catch (ApplicationException e) {
+            e.printStackTrace();
+            System.out.println("Register failed, existing");
+            System.exit(e.getErrorType().getNumber());
+        }
     }
 
-    private void registerToMaster() {
+    private void registerToMaster() throws ApplicationException {
         String masterUri = this.masterHostname + ":" + this.masterPort;
         String localUri = this.hostname + ":" + this.port;
         System.out.println("Registering local minion server " + localUri + " to master server " + masterUri);
         RestTemplate rt = new RestTemplate();
         String uri = "http://" + masterUri + "/registerMinionServer";
         HttpEntity<String> request = new HttpEntity<>(localUri);
-        ResponseEntity<String> returnReq = rt.postForEntity(uri, request, String.class);
+        try {
+            ResponseEntity<String> returnReq = rt.postForEntity(uri, request, String.class);
+        } catch (RestClientException e) {
+            e.printStackTrace();
+            throw new ApplicationException("Could not register to master server", e, ErrorType.HTTP_REQUEST_ERROR);
+        }
     }
 
-    private void decoding() {
+    private void decoding() throws ApplicationException {
         while (true) {
             if (this.hashesToDecode.isEmpty()) {
                 System.out.println("no hash to decode");
@@ -149,11 +152,8 @@ public class MinionController implements Runnable {
                     e.printStackTrace();
                 }
             }
-            try {
-                decodingHash();
-            } catch (NoSuchAlgorithmException e) {
-                e.printStackTrace();
-            }
+            decodingHash();
+
         }
     }
 
@@ -164,6 +164,26 @@ public class MinionController implements Runnable {
         synchronized (this.hashesToDecode) {
             this.hashesToDecode.remove(hashToRemove);
             System.out.println(hashToRemove + " removed from decoding list");
+        }
+    }
+
+    private void validateDecodingRange(int[] range) throws ApplicationException {
+        for (int limit : range) {
+            if (limit > 99999999 || limit < 0) {
+                throw new ApplicationException("range out of bound (" + limit + ")", ErrorType.INCORRECT_VALIDATION);
+            }
+        }
+        if (range[0] > range[1]) {
+            throw new ApplicationException("range out of bound parameters are reversed", ErrorType.INCORRECT_VALIDATION);
+        }
+    }
+
+    private void validateHash(String hash) throws ApplicationException {
+        if (hash.length() != 32) {
+            throw new ApplicationException("The hash is not 32 char long or the password is not 10 char long " + hash + ").", ErrorType.INCORRECT_VALIDATION);
+        }
+        if (!Pattern.compile("^[0-9A-Fa-f]+$").matcher(hash).matches()) {
+            throw new ApplicationException("the hash is not in hex " + hash + ").", ErrorType.INCORRECT_VALIDATION);
         }
     }
 }
