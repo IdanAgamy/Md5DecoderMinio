@@ -1,4 +1,4 @@
-package com.idan.md5DecoderMinion.beans;
-
-public class Server {
-}
+//package com.idan.md5DecoderMinion.beans;
+//
+//public class Server {
+//}

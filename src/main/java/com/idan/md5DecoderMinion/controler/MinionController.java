@@ -1,7 +1,6 @@
 package com.idan.md5DecoderMinion.controler;
 
-import com.idan.md5DecoderMinion.beans.DecodeRequest;
-import com.idan.md5DecoderMinion.beans.DecodedHash;
+//import com.idan.md5DecoderMinion.beans.DecodeRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
@@ -98,8 +97,9 @@ public class MinionController implements Runnable {
         String masterUri = this.masterHostname + ":" + this.masterPort;
         RestTemplate rt = new RestTemplate();
         String uri = "http://" + masterUri + "/getResult";
-        HttpEntity<DecodedHash> request = new HttpEntity<>(new DecodedHash(decodedPassword, decodedHash));
-        ResponseEntity<DecodeRequest> returnReq = rt.postForEntity(uri, request, DecodeRequest.class);
+        String[] results = {decodedHash, decodedPassword};
+        HttpEntity<String[]> request = new HttpEntity<>(results);
+        ResponseEntity<String[]> returnReq = rt.postForEntity(uri, request, String[].class);
     }
 
     //todo- implement
@@ -120,7 +120,7 @@ public class MinionController implements Runnable {
         RestTemplate rt = new RestTemplate();
         String uri = "http://" + masterUri + "/registerMinionServer";
         HttpEntity<String> request = new HttpEntity<>(localUri);
-        ResponseEntity<DecodeRequest> returnReq = rt.postForEntity(uri, request, DecodeRequest.class);
+        ResponseEntity<String> returnReq = rt.postForEntity(uri, request, String.class);
     }
 
     private void decoding() {
