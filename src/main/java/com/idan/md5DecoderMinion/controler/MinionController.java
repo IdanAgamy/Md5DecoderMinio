@@ -1,7 +1,12 @@
 package com.idan.md5DecoderMinion.controler;
 
 import com.idan.md5DecoderMinion.beans.DecodeRequest;
+import com.idan.md5DecoderMinion.beans.DecodedHash;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.client.RestTemplate;
 
 import javax.xml.bind.DatatypeConverter;
 import java.security.MessageDigest;
@@ -12,16 +17,23 @@ import java.util.Set;
 @Controller
 public class MinionController implements Runnable {
 
-    private Set<String> hashesToDecode;
-    private int startOfSearch;
-    private int endOfSearch;
+    private final Set<String> hashesToDecode;
+    private int startOfSearchRange;
+    private int endOfSearchRange;
     private final Object waitForHashObj;
-    private final Object waitForFinishCurrentJobObj;
+
+    @Value("${server.port}")
+    private int port;
+    @Value("${minion.hostname}")
+    private String hostname;
+    @Value("${master.port}")
+    private int masterPort;
+    @Value("${master.hostname}")
+    private String masterHostname;
 
     public MinionController() {
         this.hashesToDecode = new HashSet<>();
         this.waitForHashObj = new Object();
-        this.waitForFinishCurrentJobObj = new Object();
     }
 
     private static String returnMD5Hash(String str) throws NoSuchAlgorithmException {
@@ -29,7 +41,6 @@ public class MinionController implements Runnable {
         md.update(str.getBytes());
         byte[] digest = md.digest();
         String hash = DatatypeConverter.printHexBinary(digest).toUpperCase();
-//        System.out.println(hash);
         return hash;
     }
 
@@ -38,39 +49,57 @@ public class MinionController implements Runnable {
         return hashToDecode.equals(returnMD5Hash(passwordAttempt));
     }
 
-    public void addRequest(DecodeRequest request) throws InterruptedException {
-        validateHash(request.getHashToDecode());
-        this.hashesToDecode.add(request.getHashToDecode().toUpperCase());
+    public void addRequest(String hashTpDecode) throws InterruptedException {
+        validateHash(hashTpDecode);
+        synchronized (this.hashesToDecode) {
+            this.hashesToDecode.add(hashTpDecode.toUpperCase());
+        }
         System.out.println("request added");
         synchronized (this.waitForHashObj) {
             this.waitForHashObj.notify();
         }
-        if (this.startOfSearch != request.getStartNumber() || this.endOfSearch != request.getEndNumber()) {
-            synchronized (this.waitForFinishCurrentJobObj) {
-                System.out.println("waiting for end of current decoding");
-                this.waitForFinishCurrentJobObj.wait();
-            }
-            System.out.println("changing range");
-            updateDecodingRange(request);
-        }
     }
 
-    private void updateDecodingRange(DecodeRequest request) {
-        this.startOfSearch = request.getStartNumber();
-        this.endOfSearch = request.getEndNumber();
+    public void updateDecodingRange(int[] range) throws InterruptedException {
+        validateDecodingRange(range);
+        System.out.println("changing range to " + range[0] + "-" + range[1]);
+        this.startOfSearchRange = range[0];
+        this.endOfSearchRange = range[1];
+    }
+
+    //todo-implement
+    private void validateDecodingRange(int[] range) {
+        System.out.println("validating range");
     }
 
     private void decodingHash() throws NoSuchAlgorithmException {
-        for (int i = this.startOfSearch; i <= this.endOfSearch; i++) {
+        for (int i = this.startOfSearchRange; i <= this.endOfSearchRange; i++) {
+            if (i < this.startOfSearchRange) {
+                break;
+            }
+            String[] hashes;
+            synchronized (this.hashesToDecode) {
+                if (this.hashesToDecode.isEmpty()) {
+                    break;
+                }
+                hashes = this.hashesToDecode.toArray(new String[0]);
+            }
             String passwordAttempt = String.format("05%08d", i);
-            String[] hashes = this.hashesToDecode.toArray(new String[0]);
             for (String hashToDecode : hashes) {
                 if (isCorrectPassword(passwordAttempt, hashToDecode)) {
                     System.out.println("password for hash " + hashToDecode + " is " + passwordAttempt);
-                    this.hashesToDecode.remove(hashToDecode);
+                    sendResultToMaster(hashToDecode, passwordAttempt);
                 }
             }
         }
+    }
+
+    private void sendResultToMaster(String decodedHash, String decodedPassword) {
+        String masterUri = this.masterHostname + ":" + this.masterPort;
+        RestTemplate rt = new RestTemplate();
+        String uri = "http://" + masterUri + "/getResult";
+        HttpEntity<DecodedHash> request = new HttpEntity<>(new DecodedHash(decodedPassword, decodedHash));
+        ResponseEntity<DecodeRequest> returnReq = rt.postForEntity(uri, request, DecodeRequest.class);
     }
 
     //todo- implement
@@ -80,14 +109,24 @@ public class MinionController implements Runnable {
 
     @Override
     public void run() {
+        registerToMaster();
+        decoding();
+    }
+
+    private void registerToMaster() {
+        String masterUri = this.masterHostname + ":" + this.masterPort;
+        String localUri = this.hostname + ":" + this.port;
+        System.out.println("Registering local minion server " + localUri + " to master server " + masterUri);
+        RestTemplate rt = new RestTemplate();
+        String uri = "http://" + masterUri + "/registerMinionServer";
+        HttpEntity<String> request = new HttpEntity<>(localUri);
+        ResponseEntity<DecodeRequest> returnReq = rt.postForEntity(uri, request, DecodeRequest.class);
+    }
+
+    private void decoding() {
         while (true) {
             if (this.hashesToDecode.isEmpty()) {
-//                try {
                 System.out.println("no hash to decode");
-//                    Thread.sleep(1000);
-//                } catch (InterruptedException e) {
-//                    e.printStackTrace();
-//                }
                 try {
                     synchronized (waitForHashObj) {
                         this.waitForHashObj.wait();
@@ -99,12 +138,19 @@ public class MinionController implements Runnable {
             }
             try {
                 decodingHash();
-                synchronized (this.waitForFinishCurrentJobObj) {
-                    this.waitForFinishCurrentJobObj.notify();
-                }
             } catch (NoSuchAlgorithmException e) {
                 e.printStackTrace();
             }
+        }
+    }
+
+    public void removeHashToDecode(String hashToRemove) {
+        if (!this.hashesToDecode.contains(hashToRemove)) {
+            System.out.println("No hash " + hashToRemove + " in decoding list");
+        }
+        synchronized (this.hashesToDecode) {
+            this.hashesToDecode.remove(hashToRemove);
+            System.out.println(hashToRemove + " removed from decoding list");
         }
     }
 }
