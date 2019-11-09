@@ -1,4 +1,4 @@
-package com.idanMd5DecoderMinion.Md5DecoderMinion;
+package com.idan.md5DecoderMinion;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;

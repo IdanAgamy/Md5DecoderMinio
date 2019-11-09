@@ -1,4 +1,4 @@
-package com.idanMd5DecoderMinion.Md5DecoderMinion;
+package com.idan.md5DecoderMinion;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
