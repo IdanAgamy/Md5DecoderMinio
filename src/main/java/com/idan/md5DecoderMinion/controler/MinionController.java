@@ -4,6 +4,8 @@ package com.idan.md5DecoderMinion.controler;
 
 import com.idan.md5DecoderMinion.enums.ErrorType;
 import com.idan.md5DecoderMinion.exceptions.ApplicationException;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +27,7 @@ public class MinionController implements Runnable {
     private int startOfSearchRange;
     private int endOfSearchRange;
     private final Object waitForHashObj;
+    private static final Logger logger = LogManager.getLogger(MinionController.class);
 
     @Value("${server.port}")
     private int port;
@@ -69,9 +72,15 @@ public class MinionController implements Runnable {
         }
     }
 
+    public void addRequest(String[] hashesTpDecode) throws ApplicationException {
+        for (String hash : hashesTpDecode) {
+            addRequest(hash);
+        }
+    }
+
     public void updateDecodingRange(int[] range) throws ApplicationException {
         validateDecodingRange(range);
-        System.out.println("changing range to " + range[0] + "-" + range[1]);
+        logger.info(String.format("changing range to 05%08d-05%08d", range[0], range[1]));
         this.startOfSearchRange = range[0];
         this.endOfSearchRange = range[1];
     }
@@ -91,7 +100,7 @@ public class MinionController implements Runnable {
             String passwordAttempt = String.format("05%08d", i);
             for (String hashToDecode : hashes) {
                 if (isCorrectPassword(passwordAttempt, hashToDecode)) {
-                    System.out.println("password for hash " + hashToDecode + " is " + passwordAttempt);
+                    logger.info("password for hash " + hashToDecode + " is " + passwordAttempt);
                     sendResultToMaster(hashToDecode, passwordAttempt);
                 }
             }
@@ -119,7 +128,7 @@ public class MinionController implements Runnable {
             decoding();
         } catch (ApplicationException e) {
             e.printStackTrace();
-            System.out.println("Register failed, existing");
+            logger.error("Register failed, existing");
             System.exit(e.getErrorType().getNumber());
         }
     }
@@ -127,7 +136,7 @@ public class MinionController implements Runnable {
     private void registerToMaster() throws ApplicationException {
         String masterUri = this.masterHostname + ":" + this.masterPort;
         String localUri = this.hostname + ":" + this.port;
-        System.out.println("Registering local minion server " + localUri + " to master server " + masterUri);
+        logger.info("Registering local minion server " + localUri + " to master server " + masterUri);
         RestTemplate rt = new RestTemplate();
         String uri = "http://" + masterUri + "/registerMinionServer";
         HttpEntity<String> request = new HttpEntity<>(localUri);
@@ -142,28 +151,27 @@ public class MinionController implements Runnable {
     private void decoding() throws ApplicationException {
         while (true) {
             if (this.hashesToDecode.isEmpty()) {
-                System.out.println("no hash to decode");
+                logger.debug("no hash to decode");
                 try {
                     synchronized (waitForHashObj) {
                         this.waitForHashObj.wait();
-                        System.out.println("resuming");
+                        logger.debug("resuming");
                     }
                 } catch (InterruptedException e) {
                     e.printStackTrace();
                 }
             }
             decodingHash();
-
         }
     }
 
     public void removeHashToDecode(String hashToRemove) {
         if (!this.hashesToDecode.contains(hashToRemove)) {
-            System.out.println("No hash " + hashToRemove + " in decoding list");
+            logger.debug("No hash " + hashToRemove + " in decoding list");
         }
         synchronized (this.hashesToDecode) {
             this.hashesToDecode.remove(hashToRemove);
-            System.out.println(hashToRemove + " removed from decoding list");
+            logger.info(hashToRemove + " removed from decoding list");
         }
     }
 

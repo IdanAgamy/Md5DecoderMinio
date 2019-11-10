@@ -19,6 +19,11 @@ public class MinionApi {
         controller.addRequest(hashToDecode);
     }
 
+    @RequestMapping(value = "/multipleDecodeRequest", method = RequestMethod.POST)
+    public void startDecoding(@RequestBody String[] hashesToDecode) throws ApplicationException {
+        controller.addRequest(hashesToDecode);
+    }
+
     @RequestMapping(value = "/removeHash", method = RequestMethod.POST)
     public void removeHashToDecode(@RequestBody String hashToRemove) {
         controller.removeHashToDecode(hashToRemove);
